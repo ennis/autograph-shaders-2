@@ -1,0 +1,120 @@
+
+Passes
+_____________________________
+
+
+	1. Find shader functions
+	2. Build a database of types that are visible on the CPU size, and check their layout
+	3. ...
+
+
+Declarations
+_____________________________
+	
+
+	* DeclStmt->VarDecl
+		Extract type, convert to GLSL base type or existing struct
+		(optional) Generate value for expression
+	* CXXConstructExpr
+		generate subexpression
+	* MaterializeTemporaryExpr
+		generate subexpression
+	* CXXOperatorCallExpr
+		check if the operator references the declaration of a built-in vector operator
+
+
+Shader parameters
+_____________________________
+
+ * Parameters shared between shader stages?
+ 	-> bind them twice?
+
+
+
+
+Compilation phases 
+_____________________________
+
+
+ 1. Create a Sema context. Traverse the AST.
+ 	Semcheck records, functions, pipelines
+ 
+ 3. Check record types for illegal fields (unrepresentable types, etc.)
+ 	[SemaRecord.cpp]
+ 	<fxc::Sema>
+ 	<fxc::Record>
+ 
+ 4. Contextual check of record types
+ 	Example: A record type that is not a subclass of ProgramPipeline 
+ 	 		 should not contain any special type  
+ 	[SemaRecord.cpp]
+ 	<fxc::Sema>
+ 	<fxc::Record>
+
+ 5. Check fields of program pipelines (including incomplete ones) and assign resource locations/registers
+ 	Also: instantiate a record type for the fields that are not accessed through 
+ 	a pointer type, or that have no explicit binding location
+ 	-> Create a resource signature for the pipeline
+ 	[SemaPipelines.cpp]
+ 	[ResourceLocation.cpp]
+ 	<fxc::Sema>
+ 	<fxc::ResourceLocation>
+ 	<fxc::ResourceSignature>
+
+ 6. Link the (complete) program pipelines
+ 	Type-check the interface between shader, verify that stage-required outputs are there
+ 	Generate input layouts
+ 	[SemaPipelines.cpp]
+ 	<fxc::Sema>
+ 	<fxc::ShaderInterface>
+ 	<fxc::VertexInputLayout>
+ 
+ 7. Layout record members 
+ 	Possibly reorder fields and insert dummy fields (to match the alignement requirements of std140)
+ 	[RecordLayouter.cpp]
+ 	<fxc::Record>
+
+ 8. Create an fxc::Module containing the pipelines to feed to codegen
+ 	<fxc::Sema>
+ 	<fxc::Module>
+
+ 8. Generate program pipelines (if the module contains any)
+ 	[CG.cpp]
+ 	<fxc::Module>
+ 	<fxc::CodeGen>
+
+ 	8.1. Generate a GLSL shader source for each stage
+
+ 		8.1.1 Generate resource header from the resource signature
+ 		[CGGLSLHeader.cpp]
+ 		8.1.2 VS: Generate input layout header
+ 		[CGGLSLHeader.cpp]
+ 		8.1.3 Generate GLSL code from the shader function AST (inline all functions)
+ 		[CGGLSLFunction.cpp]
+
+ 9. Generate C++ header file (using a clang rewriter?)
+ 	(copy classes, structs and functions)
+ 	[CGCppHeader.cpp]
+ 	<fxc::Module>
+ 	<fxc::CodeGenCpp>
+
+
+
+[SemaTypes.cpp]
+
+Sema::TranslateType(LayoutRequirements)
+	pass a type, returns a valid GLSL type
+	also tells the kind of type processed (pointer type, NotSpecial, Texture, Sampler...)
+
+Sema::TranslateTextureType
+	called by TranslateType when the type is ag::texture_view<T>
+	returns a GLSL image or texture type, depending on the qualifiers of T (const or not)
+
+Sema::TranslateVectorType
+	translate ag::vecN, ag::matNxN to GLSL types 
+
+Sema::TranslateCXXRecordType(LayoutRequirements)
+	called by TranslateType when the type is a struct (or a pointer to a struct)
+	first, look if the record type has already been translated
+	if not, translate all fields according to layout requirements (std140), 
+	create a new GLSL struct type and return it
